@@ -19,6 +19,7 @@ export interface Product {
   year?: string;
   reviews: Review[];
   isFeatured?: boolean;
+  passcode?: string;
 }
 
 export interface CartItem {

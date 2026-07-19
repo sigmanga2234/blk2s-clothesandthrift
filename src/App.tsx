@@ -42,6 +42,9 @@ export default function App() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string>('');
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
+  const [passcodeVerified, setPasscodeVerified] = useState<boolean>(() => {
+    return localStorage.getItem('thrift_store_curator_passcode') === 'BLK2S';
+  });
 
   // Scroll target reference
   const orderSectionRef = useRef<HTMLDivElement>(null);
@@ -82,9 +85,10 @@ export default function App() {
           let isUpdated = false;
           INITIAL_PRODUCTS.forEach(initialProd => {
             if (!merged.some(item => item.id === initialProd.id)) {
-              merged.push(initialProd);
+              const withPasscode = { ...initialProd, passcode: 'BLK2S' };
+              merged.push(withPasscode);
               isUpdated = true;
-              setDoc(doc(db, 'products', initialProd.id), initialProd).catch(e => console.error("Failed to seed initial product:", e));
+              setDoc(doc(db, 'products', initialProd.id), withPasscode).catch(e => console.error("Failed to seed initial product:", e));
             }
           });
 
@@ -96,11 +100,14 @@ export default function App() {
           // Firestore database is blank, seed it with initial products
           setSyncMessage('Bootstrapping public catalog database...');
           const seedPromises = INITIAL_PRODUCTS.map(prod => {
-            return setDoc(doc(db, 'products', prod.id), prod);
+            const withPasscode = { ...prod, passcode: 'BLK2S' };
+            return setDoc(doc(db, 'products', prod.id), withPasscode);
           });
           await Promise.all(seedPromises);
-          setProducts(INITIAL_PRODUCTS);
-          localStorage.setItem('thrift_store_products', JSON.stringify(INITIAL_PRODUCTS));
+          
+          const initialWithPasscode = INITIAL_PRODUCTS.map(p => ({ ...p, passcode: 'BLK2S' }));
+          setProducts(initialWithPasscode);
+          localStorage.setItem('thrift_store_products', JSON.stringify(initialWithPasscode));
           setSyncMessage('Global database seeded!');
           setTimeout(() => setSyncMessage(''), 2000);
         }
@@ -292,11 +299,10 @@ export default function App() {
     setIsSyncing(true);
     setSyncMessage('Activating curator credentials...');
     try {
-      const user = await loginAnonymously();
-      if (user) {
-        setSyncMessage('Direct sync active!');
-        setTimeout(() => setSyncMessage(''), 2000);
-      }
+      setPasscodeVerified(true);
+      localStorage.setItem('thrift_store_curator_passcode', 'BLK2S');
+      setSyncMessage('Direct global sync active!');
+      setTimeout(() => setSyncMessage(''), 2000);
     } catch (err: any) {
       console.error('Anonymous sign-in failed:', err);
       setSyncMessage(`Setup failed: ${err.message || err}`);
@@ -311,7 +317,8 @@ export default function App() {
     const freshProduct: Product = {
       ...newProd,
       id: `p-${Date.now()}`,
-      reviews: []
+      reviews: [],
+      passcode: 'BLK2S'
     };
     
     const updated = [freshProduct, ...products];
@@ -325,7 +332,7 @@ export default function App() {
       setTimeout(() => setSyncMessage(''), 1500);
     } catch (error) {
       console.error("Failed to add product to global database:", error);
-      setSyncMessage('Saved locally. Sign in to update global catalog.');
+      setSyncMessage('Saved locally. Enter passcode to update global catalog.');
       setTimeout(() => setSyncMessage(''), 4000);
     }
   };
@@ -341,7 +348,7 @@ export default function App() {
     let targetProduct: Product | null = null;
     const updated = products.map(p => {
       if (p.id === productId) {
-        const merged = { ...p, ...updatedFields };
+        const merged = { ...p, ...updatedFields, passcode: 'BLK2S' };
         // Sync open detail view modal if that's the one edited
         if (selectedProduct && selectedProduct.id === productId) {
           setSelectedProduct(merged);
@@ -363,7 +370,7 @@ export default function App() {
         setTimeout(() => setSyncMessage(''), 1500);
       } catch (error) {
         console.error("Failed to update product in global database:", error);
-        setSyncMessage('Saved locally. Sign in to update global catalog.');
+        setSyncMessage('Saved locally. Enter passcode to update global catalog.');
         setTimeout(() => setSyncMessage(''), 4000);
       }
     }
@@ -388,7 +395,7 @@ export default function App() {
       setTimeout(() => setSyncMessage(''), 1500);
     } catch (error) {
       console.error("Failed to delete product from global database:", error);
-      setSyncMessage('Removed locally. Sign in to update global catalog.');
+      setSyncMessage('Removed locally. Enter passcode to authorize.');
       setTimeout(() => setSyncMessage(''), 4000);
     }
   };
@@ -493,11 +500,11 @@ export default function App() {
               <span className="uppercase tracking-wider">STUDIO MODE ACTIVE</span>
             </div>
             <span className="text-stone-900/40 hidden md:inline">|</span>
-            {firebaseUser ? (
+            {(firebaseUser || passcodeVerified) ? (
               <div className="flex items-center gap-1.5">
                 <Database size={14} className="text-emerald-950 shrink-0" />
                 <span className="text-[11px] text-stone-900 uppercase font-bold">
-                  Global Sync Active {firebaseUser.isAnonymous ? '(Curator Passcode)' : `(${firebaseUser.email})`}
+                  Global Sync Active {firebaseUser ? (firebaseUser.isAnonymous ? '(Curator Passcode)' : `(${firebaseUser.email})`) : '(Curator Passcode)'}
                 </span>
                 {driveConnected && (
                   <span className="text-[10px] text-emerald-950/80 uppercase font-mono hidden sm:inline">• Google Drive Synced</span>
@@ -506,7 +513,7 @@ export default function App() {
             ) : (
               <div className="flex items-center gap-1.5">
                 <CloudOff size={14} className="text-stone-700 shrink-0" />
-                <span className="text-[11px] text-stone-900 uppercase">Local-Only Mode (Sign in inside modal to sync with your phone)</span>
+                <span className="text-[11px] text-stone-900 uppercase">Local-Only Mode (Enter passcode inside modal to sync with your phone)</span>
               </div>
             )}
             
@@ -795,7 +802,7 @@ export default function App() {
         productToEdit={productToEdit}
         driveConnected={driveConnected}
         onConnectDrive={handleConnectDrive}
-        firebaseUser={firebaseUser}
+        firebaseUser={firebaseUser || (passcodeVerified ? { isAnonymous: true } : null)}
         onSignInAnonymously={handleSignInAnonymously}
       />
     </div>
