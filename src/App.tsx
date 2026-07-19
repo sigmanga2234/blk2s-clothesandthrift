@@ -766,6 +766,8 @@ export default function App() {
         onAddProduct={handleAddNewProduct}
         onUpdateProduct={handleUpdateProduct}
         productToEdit={productToEdit}
+        driveConnected={driveConnected}
+        onConnectDrive={handleConnectDrive}
       />
     </div>
   );

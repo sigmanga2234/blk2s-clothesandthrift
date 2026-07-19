@@ -8,6 +8,8 @@ interface AddProductModalProps {
   onAddProduct: (product: Omit<Product, 'id' | 'reviews'>) => void;
   onUpdateProduct?: (productId: string, product: Partial<Product>) => void;
   productToEdit?: Product | null;
+  driveConnected?: boolean;
+  onConnectDrive?: () => void;
 }
 
 export default function AddProductModal({ 
@@ -15,7 +17,9 @@ export default function AddProductModal({
   onClose, 
   onAddProduct, 
   onUpdateProduct, 
-  productToEdit = null 
+  productToEdit = null,
+  driveConnected = false,
+  onConnectDrive
 }: AddProductModalProps) {
   const [title, setTitle] = useState('');
   const [price, setPrice] = useState('');
@@ -273,6 +277,27 @@ export default function AddProductModal({
 
         {/* Modal Body / Form */}
         <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-6 flex-1">
+          {!driveConnected && (
+            <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-amber-200 text-xs font-mono flex flex-col sm:flex-row gap-4 items-center justify-between">
+              <div className="flex gap-2.5 items-start">
+                <ShieldAlert size={18} className="shrink-0 text-amber-400 mt-0.5 animate-pulse" />
+                <div className="space-y-1">
+                  <span className="font-bold text-amber-400 block uppercase tracking-wider text-[11px]">Unsigned Curator Mode (Local Only)</span>
+                  <p className="text-stone-300 text-[11px] leading-relaxed">
+                    You are not signed in. Products registered now will only be saved in this browser, and won't appear on other devices (like your phone) or other visitors' screens.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={onConnectDrive}
+                className="shrink-0 w-full sm:w-auto px-4 py-2 bg-amber-400 hover:bg-amber-300 text-stone-950 font-bold rounded-xl transition-all cursor-pointer text-[10px] uppercase tracking-widest shadow-md hover:scale-105 active:scale-95 flex items-center justify-center gap-1.5"
+              >
+                Sign In with Google
+              </button>
+            </div>
+          )}
+
           {Object.keys(errors).length > 0 && (
             <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-xs font-mono flex gap-2 items-start">
               <ShieldAlert size={16} className="shrink-0 mt-0.5" />
