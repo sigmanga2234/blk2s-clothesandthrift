@@ -31,7 +31,7 @@ service cloud.firestore {
         && data.category is string && data.category.size() <= 50
         && data.image is string
         && data.description is string && data.description.size() <= 1000
-        && data.size is string && data.size.size() <= 20
+        && data.size is string && data.size.size() <= 50
         && (data.condition == 'Mint' || data.condition == 'Excellent' || data.condition == 'Gently Used' || data.condition == 'Distressed')
         && data.reviews is list;
     }

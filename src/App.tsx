@@ -46,6 +46,34 @@ export default function App() {
     return localStorage.getItem('thrift_store_curator_passcode') === 'BLK2S';
   });
 
+  const [notifications, setNotifications] = useState<any[]>(() => {
+    const saved = localStorage.getItem('thrift_store_notifications');
+    return saved ? JSON.parse(saved) : [
+      {
+        id: 'n-initial-1',
+        title: '🌍 CATALOG ONLINE',
+        message: 'BLK2S Vintage catalog is now connected worldwide to Firebase Firestore.',
+        date: 'Just now',
+        type: 'system',
+        isRead: false
+      }
+    ];
+  });
+  const [activeToast, setActiveToast] = useState<{ id: string; title: string; message: string } | null>(null);
+
+  const triggerToast = (productTitle: string) => {
+    const id = `toast-${Date.now()}`;
+    setActiveToast({
+      id,
+      title: '🌍 WORLDWIDE DROP ACTIVE',
+      message: `"${productTitle}" is now live and visible worldwide!`
+    });
+    // Auto clear after 6 seconds
+    setTimeout(() => {
+      setActiveToast(current => current?.id === id ? null : current);
+    }, 6000);
+  };
+
   // Scroll target reference
   const orderSectionRef = useRef<HTMLDivElement>(null);
 
@@ -91,6 +119,40 @@ export default function App() {
               setDoc(doc(db, 'products', initialProd.id), withPasscode).catch(e => console.error("Failed to seed initial product:", e));
             }
           });
+
+          // Check if there are any new remote products that we didn't have stored locally
+          if (storedProducts) {
+            try {
+              const previousList = JSON.parse(storedProducts) as Product[];
+              const newRemoteDrops = dbProducts.filter(dbP => 
+                !previousList.some(prevP => prevP.id === dbP.id) &&
+                !INITIAL_PRODUCTS.some(initP => initP.id === dbP.id)
+              );
+
+              if (newRemoteDrops.length > 0) {
+                const newNotifications = newRemoteDrops.map(drop => ({
+                  id: `n-remote-${drop.id}-${Date.now()}`,
+                  title: '🌍 NEW WORLDWIDE DROP',
+                  message: `"${drop.title}" is now live and visible worldwide!`,
+                  date: 'Just now',
+                  type: 'drop',
+                  isRead: false,
+                  product: drop
+                }));
+
+                setNotifications(prev => {
+                  const updated = [...newNotifications, ...prev];
+                  localStorage.setItem('thrift_store_notifications', JSON.stringify(updated));
+                  return updated;
+                });
+
+                // Trigger toast for the latest drop
+                triggerToast(newRemoteDrops[0].title);
+              }
+            } catch (e) {
+              console.error('Error checking for new remote drops:', e);
+            }
+          }
 
           setProducts(merged);
           localStorage.setItem('thrift_store_products', JSON.stringify(merged));
@@ -330,6 +392,24 @@ export default function App() {
       await setDoc(doc(db, 'products', freshProduct.id), freshProduct);
       setSyncMessage('Product published globally!');
       setTimeout(() => setSyncMessage(''), 1500);
+
+      const newNotif = {
+        id: `n-local-${freshProduct.id}-${Date.now()}`,
+        title: '🌍 WORLDWIDE DROP ACTIVE',
+        message: `"${freshProduct.title}" has been published and is now visible worldwide!`,
+        date: 'Just now',
+        type: 'drop',
+        isRead: false,
+        product: freshProduct
+      };
+
+      setNotifications(prev => {
+        const updatedNotifs = [newNotif, ...prev];
+        localStorage.setItem('thrift_store_notifications', JSON.stringify(updatedNotifs));
+        return updatedNotifs;
+      });
+
+      triggerToast(freshProduct.title);
     } catch (error) {
       console.error("Failed to add product to global database:", error);
       setSyncMessage('Saved locally. Enter passcode to update global catalog.');
@@ -489,6 +569,23 @@ export default function App() {
   const sizes = ['All', 'S', 'M', 'L', 'XL', 'One Size'];
   const conditions = ['All', 'Mint', 'Excellent', 'Gently Used', 'Distressed'];
 
+  const handleNotificationClick = (notif: any) => {
+    if (notif.product) {
+      setSelectedProduct(notif.product);
+      setIsDetailOpen(true);
+    }
+    // Mark as read
+    const updated = notifications.map(n => n.id === notif.id ? { ...n, isRead: true } : n);
+    setNotifications(updated);
+    localStorage.setItem('thrift_store_notifications', JSON.stringify(updated));
+  };
+
+  const handleMarkAllNotificationsAsRead = () => {
+    const updated = notifications.map(n => ({ ...n, isRead: true }));
+    setNotifications(updated);
+    localStorage.setItem('thrift_store_notifications', JSON.stringify(updated));
+  };
+
   return (
     <div className="min-h-screen bg-stone-950 text-stone-100 flex flex-col font-sans antialiased selection:bg-amber-400 selection:text-stone-950">
       
@@ -567,6 +664,9 @@ export default function App() {
           setIsCuratorMode(true);
           setIsAddModalOpen(true);
         }}
+        notifications={notifications}
+        onNotificationClick={handleNotificationClick}
+        onMarkAllAsRead={handleMarkAllNotificationsAsRead}
       />
 
       {/* Hero Visual Area */}
@@ -805,6 +905,35 @@ export default function App() {
         firebaseUser={firebaseUser || (passcodeVerified ? { isAnonymous: true } : null)}
         onSignInAnonymously={handleSignInAnonymously}
       />
+
+      {/* Active Drop Toast Notification */}
+      {activeToast && (
+        <div 
+          className="fixed bottom-6 right-6 z-50 max-w-sm w-[calc(100vw-3rem)] sm:w-96 bg-stone-900 border-2 border-amber-500 rounded-2xl shadow-2xl p-4 flex gap-3 animate-in slide-in-from-bottom-5 duration-300"
+          id={activeToast.id}
+        >
+          <div className="w-8 h-8 rounded-full bg-amber-500/10 border border-amber-400/20 text-amber-400 flex items-center justify-center shrink-0">
+            <Sparkles size={16} className="animate-spin" style={{ animationDuration: '3s' }} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h4 className="text-[10px] font-mono font-black text-amber-400 tracking-wider uppercase">
+              {activeToast.title}
+            </h4>
+            <p className="text-xs text-stone-100 mt-1 font-sans font-semibold leading-relaxed">
+              {activeToast.message}
+            </p>
+            <span className="text-[9px] text-stone-500 font-mono mt-1.5 block">
+              Just now • Visible worldwide
+            </span>
+          </div>
+          <button
+            onClick={() => setActiveToast(null)}
+            className="text-stone-500 hover:text-white text-xs shrink-0 self-start p-1 cursor-pointer"
+          >
+            ✕
+          </button>
+        </div>
+      )}
     </div>
   );
 }

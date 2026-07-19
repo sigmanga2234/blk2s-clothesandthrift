@@ -1,11 +1,14 @@
 import React, { useState } from 'react';
-import { Search, Sparkles, Send, Lock } from 'lucide-react';
+import { Search, Sparkles, Send, Lock, Bell } from 'lucide-react';
 
 interface NavbarProps {
   searchTerm: string;
   onSearchChange: (term: string) => void;
   onOrderClick: () => void;
   onSecretClick: () => void;
+  notifications: any[];
+  onNotificationClick: (notif: any) => void;
+  onMarkAllAsRead: () => void;
 }
 
 export default function Navbar({
@@ -13,9 +16,15 @@ export default function Navbar({
   onSearchChange,
   onOrderClick,
   onSecretClick,
+  notifications,
+  onNotificationClick,
+  onMarkAllAsRead,
 }: NavbarProps) {
   const [clickCount, setClickCount] = useState(0);
   const [clickTimeout, setClickTimeout] = useState<NodeJS.Timeout | null>(null);
+  const [isNotifOpen, setIsNotifOpen] = useState(false);
+  
+  const unreadCount = notifications.filter(n => !n.isRead).length;
 
   const handleLogoClick = () => {
     const newCount = clickCount + 1;
@@ -93,7 +102,75 @@ export default function Navbar({
           </div>
 
           {/* Actions */}
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 relative">
+            {/* Notification Bell */}
+            <div className="relative">
+              <button
+                onClick={() => setIsNotifOpen(!isNotifOpen)}
+                className="p-2.5 bg-stone-800 hover:bg-stone-750 text-stone-300 hover:text-amber-400 rounded-lg border border-stone-700/50 transition-all cursor-pointer relative"
+                title="Worldwide Notifications"
+              >
+                <Bell size={16} />
+                {unreadCount > 0 && (
+                  <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-stone-950 animate-pulse">
+                    {unreadCount}
+                  </span>
+                )}
+              </button>
+
+              {isNotifOpen && (
+                <div className="absolute right-0 mt-2 w-80 bg-stone-900 border border-stone-800 rounded-2xl shadow-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                  <div className="flex items-center justify-between px-4 py-3 border-b border-stone-800 bg-stone-900/50">
+                    <span className="text-xs font-mono font-bold uppercase tracking-wider text-stone-300">Worldwide Drops</span>
+                    {unreadCount > 0 && (
+                      <button
+                        onClick={() => {
+                          onMarkAllAsRead();
+                        }}
+                        className="text-[10px] font-mono text-amber-400 hover:underline cursor-pointer"
+                      >
+                        Mark all read
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="max-h-64 overflow-y-auto divide-y divide-stone-850">
+                    {notifications.length === 0 ? (
+                      <div className="px-4 py-6 text-center text-stone-500 text-xs">
+                        No worldwide notifications.
+                      </div>
+                    ) : (
+                      notifications.map(notif => (
+                        <button
+                          key={notif.id}
+                          onClick={() => {
+                            onNotificationClick(notif);
+                            setIsNotifOpen(false);
+                          }}
+                          className={`w-full px-4 py-3 hover:bg-stone-850 transition-colors cursor-pointer text-left block ${!notif.isRead ? 'bg-stone-850/40' : ''}`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="text-[10px] font-mono font-bold text-amber-400 uppercase tracking-wide block">
+                              {notif.title}
+                            </span>
+                            {!notif.isRead && (
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0 mt-1" />
+                            )}
+                          </div>
+                          <p className="text-xs text-stone-300 mt-1 line-clamp-2 leading-relaxed">
+                            {notif.message}
+                          </p>
+                          <span className="text-[9px] text-stone-500 font-mono mt-1.5 block">
+                            {notif.date}
+                          </span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Order / Contact Section Link Button */}
             <button
               onClick={onOrderClick}
