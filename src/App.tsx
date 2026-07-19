@@ -1,11 +1,22 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Sparkles, RefreshCw, Info, Filter, ArrowUpDown, Flame, BookmarkCheck, ShieldCheck, Instagram, Send, ArrowRight, MessageSquare, Check, HelpCircle } from 'lucide-react';
+import { Sparkles, RefreshCw, Info, Filter, ArrowUpDown, Flame, BookmarkCheck, ShieldCheck, Instagram, Send, ArrowRight, MessageSquare, Check, HelpCircle, Cloud, CloudOff, Database, Loader2 } from 'lucide-react';
 import Navbar from './components/Navbar';
 import ProductCard from './components/ProductCard';
 import ProductDetailModal from './components/ProductDetailModal';
 import AddProductModal from './components/AddProductModal';
 import { INITIAL_PRODUCTS } from './data';
 import { Product, Review } from './types';
+import { 
+  initAuth, 
+  googleSignIn, 
+  logout, 
+  findDriveFile, 
+  downloadDriveFile, 
+  createDriveFile, 
+  updateDriveFileContent, 
+  getAccessToken 
+} from './lib/driveAuth';
+import { User } from 'firebase/auth';
 
 export default function App() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -22,19 +33,26 @@ export default function App() {
   const [isCuratorMode, setIsCuratorMode] = useState(false);
   const [productToEdit, setProductToEdit] = useState<Product | null>(null);
 
+  // Google Drive & Auth states
+  const [googleUser, setGoogleUser] = useState<User | null>(null);
+  const [driveConnected, setDriveConnected] = useState(false);
+  const [driveFileId, setDriveFileId] = useState<string | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string>('');
+
   // Scroll target reference
   const orderSectionRef = useRef<HTMLDivElement>(null);
 
   // Initialize data on load with smart sync to preserve user-added products
   useEffect(() => {
+    // 1. Initial Local load from localStorage
     const storedProducts = localStorage.getItem('thrift_store_products');
+    let localList: Product[] = [];
     if (storedProducts) {
       try {
         const parsed = JSON.parse(storedProducts) as Product[];
-        
-        // Smart merge: make sure all INITIAL_PRODUCTS are in the list by checking ID
-        let isUpdated = false;
         const mergedList = [...parsed];
+        let isUpdated = false;
         
         INITIAL_PRODUCTS.forEach(initialProd => {
           if (!mergedList.some(item => item.id === initialProd.id)) {
@@ -44,20 +62,184 @@ export default function App() {
         });
 
         if (isUpdated) {
-          setProducts(mergedList);
           localStorage.setItem('thrift_store_products', JSON.stringify(mergedList));
-        } else {
-          setProducts(parsed);
         }
+        localList = mergedList;
+        setProducts(mergedList);
       } catch (e) {
         setProducts(INITIAL_PRODUCTS);
         localStorage.setItem('thrift_store_products', JSON.stringify(INITIAL_PRODUCTS));
+        localList = INITIAL_PRODUCTS;
       }
     } else {
       setProducts(INITIAL_PRODUCTS);
       localStorage.setItem('thrift_store_products', JSON.stringify(INITIAL_PRODUCTS));
+      localList = INITIAL_PRODUCTS;
     }
+
+    // 2. Auth listener to restore active Google Drive session
+    const unsubscribe = initAuth(
+      async (user, token) => {
+        setGoogleUser(user);
+        setDriveConnected(true);
+        setIsSyncing(true);
+        setSyncMessage('Google session active. Fetching latest catalog backups...');
+        try {
+          const fileId = await findDriveFile(token);
+          if (fileId) {
+            setDriveFileId(fileId);
+            setSyncMessage('Syncing with Google Drive...');
+            const remoteProducts = await downloadDriveFile(token, fileId);
+            if (remoteProducts && remoteProducts.length > 0) {
+              // Smart merge local and remote
+              const currentLocal = JSON.parse(localStorage.getItem('thrift_store_products') || '[]');
+              const merged = [...currentLocal];
+              
+              remoteProducts.forEach(item => {
+                const idx = merged.findIndex(p => p.id === item.id);
+                if (idx >= 0) {
+                  merged[idx] = item;
+                } else {
+                  merged.push(item);
+                }
+              });
+
+              // Ensure INITIAL_PRODUCTS are present
+              INITIAL_PRODUCTS.forEach(initialProd => {
+                if (!merged.some(item => item.id === initialProd.id)) {
+                  merged.push(initialProd);
+                }
+              });
+
+              setProducts(merged);
+              localStorage.setItem('thrift_store_products', JSON.stringify(merged));
+              
+              // Push merged state back to drive to ensure clean sync
+              await updateDriveFileContent(token, fileId, merged);
+            }
+          }
+          setSyncMessage('');
+        } catch (err) {
+          console.error('Initial Drive Sync error:', err);
+          setSyncMessage('Background sync offline. Check your network.');
+          setTimeout(() => setSyncMessage(''), 4000);
+        } finally {
+          setIsSyncing(false);
+        }
+      },
+      () => {
+        setGoogleUser(null);
+        setDriveConnected(false);
+        setDriveFileId(null);
+      }
+    );
+
+    return () => unsubscribe();
   }, []);
+
+  // Sync state to Google Drive on content changes
+  const syncToDrive = async (updatedList: Product[]) => {
+    const token = getAccessToken();
+    if (driveConnected && driveFileId && token) {
+      setIsSyncing(true);
+      setSyncMessage('Backing up changes to Google Drive...');
+      try {
+        await updateDriveFileContent(token, driveFileId, updatedList);
+        setSyncMessage('Cloud backup updated.');
+        setTimeout(() => setSyncMessage(''), 1500);
+      } catch (err) {
+        console.error('Error backing up to Google Drive:', err);
+        setSyncMessage('Cloud save failed. Session might be expired.');
+        setTimeout(() => setSyncMessage(''), 3000);
+      } finally {
+        setIsSyncing(false);
+      }
+    }
+  };
+
+  // Connect & Sync with Google Account Popup
+  const handleConnectDrive = async () => {
+    setIsSyncing(true);
+    setSyncMessage('Connecting to Google Account...');
+    try {
+      const authResult = await googleSignIn();
+      if (authResult) {
+        setGoogleUser(authResult.user);
+        const token = authResult.accessToken;
+        
+        setSyncMessage('Searching for archive file in your Drive...');
+        const fileId = await findDriveFile(token);
+        
+        let activeFileId = fileId;
+        let finalProducts = [...products];
+        
+        if (fileId) {
+          setSyncMessage('Downloading cloud catalog from your Drive...');
+          setDriveFileId(fileId);
+          const remoteProducts = await downloadDriveFile(token, fileId);
+          
+          if (remoteProducts && remoteProducts.length > 0) {
+            setSyncMessage('Merging catalog files...');
+            const mergedList = [...products];
+            remoteProducts.forEach(item => {
+              const idx = mergedList.findIndex(p => p.id === item.id);
+              if (idx >= 0) {
+                mergedList[idx] = item;
+              } else {
+                mergedList.push(item);
+              }
+            });
+            
+            INITIAL_PRODUCTS.forEach(initialProd => {
+              if (!mergedList.some(item => item.id === initialProd.id)) {
+                mergedList.push(initialProd);
+              }
+            });
+            
+            finalProducts = mergedList;
+            setProducts(mergedList);
+            localStorage.setItem('thrift_store_products', JSON.stringify(mergedList));
+            
+            setSyncMessage('Uploading synced data to Google Drive...');
+            await updateDriveFileContent(token, fileId, mergedList);
+          } else {
+            setSyncMessage('Uploading current catalog to Google Drive...');
+            await updateDriveFileContent(token, fileId, products);
+          }
+        } else {
+          setSyncMessage('Creating new archive file in Google Drive...');
+          const newId = await createDriveFile(token, products);
+          if (newId) {
+            activeFileId = newId;
+            setDriveFileId(newId);
+          }
+        }
+        
+        setDriveConnected(true);
+        setSyncMessage('Google Drive sync active!');
+        setTimeout(() => setSyncMessage(''), 3000);
+      }
+    } catch (err: any) {
+      console.error('Google Drive Sync setup failed:', err);
+      setSyncMessage('Authentication or file setup failed.');
+      setTimeout(() => setSyncMessage(''), 4000);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleDisconnectDrive = async () => {
+    try {
+      await logout();
+      setGoogleUser(null);
+      setDriveConnected(false);
+      setDriveFileId(null);
+      setSyncMessage('Google Drive disconnected.');
+      setTimeout(() => setSyncMessage(''), 2000);
+    } catch (err) {
+      console.error('Disconnect failed:', err);
+    }
+  };
 
   // Handler for adding a new product (Secret button / Curator panel)
   const handleAddNewProduct = (newProd: Omit<Product, 'id' | 'reviews'>) => {
@@ -70,6 +252,7 @@ export default function App() {
     const updated = [freshProduct, ...products];
     setProducts(updated);
     localStorage.setItem('thrift_store_products', JSON.stringify(updated));
+    syncToDrive(updated);
   };
 
   // Handler for editing an existing product
@@ -94,6 +277,7 @@ export default function App() {
     setProducts(updated);
     localStorage.setItem('thrift_store_products', JSON.stringify(updated));
     setProductToEdit(null);
+    syncToDrive(updated);
   };
 
   // Handler for removing a product
@@ -107,6 +291,7 @@ export default function App() {
       setIsDetailOpen(false);
       setSelectedProduct(null);
     }
+    syncToDrive(updated);
   };
 
   // Scroll helper
@@ -141,6 +326,7 @@ export default function App() {
 
     setProducts(updatedProducts);
     localStorage.setItem('thrift_store_products', JSON.stringify(updatedProducts));
+    syncToDrive(updatedProducts);
   };
 
   // Filter and Sort calculation
@@ -185,17 +371,70 @@ export default function App() {
     <div className="min-h-screen bg-stone-950 text-stone-100 flex flex-col font-sans antialiased selection:bg-amber-400 selection:text-stone-950">
       
       {isCuratorMode && (
-        <div className="bg-amber-400 text-stone-950 px-4 py-2 text-center text-xs font-mono font-bold flex items-center justify-between gap-3 animate-in slide-in-from-top duration-200 sticky top-0 z-50 shadow-md">
-          <div className="flex items-center gap-1.5 mx-auto">
-            <span className="w-2 h-2 rounded-full bg-stone-950 animate-ping" />
-            <span>CURATOR ACTIVE • EDIT OR REMOVE ITEMS DIRECTLY ON CARDS</span>
+        <div className="bg-amber-400 text-stone-950 px-4 py-2 text-xs font-mono font-bold flex flex-col md:flex-row items-center justify-between gap-3 animate-in slide-in-from-top duration-200 sticky top-0 z-50 shadow-md border-b border-amber-500">
+          <div className="flex flex-wrap items-center justify-center md:justify-start gap-3">
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-stone-950 animate-ping" />
+              <span className="uppercase tracking-wider">STUDIO MODE ACTIVE</span>
+            </div>
+            <span className="text-stone-900/40 hidden md:inline">|</span>
+            {driveConnected ? (
+              <div className="flex items-center gap-1.5">
+                <Cloud size={14} className="text-emerald-900" />
+                <span className="text-[11px] text-stone-900 uppercase">
+                  Drive Synced: <span className="underline decoration-stone-900/30">{googleUser?.email}</span>
+                </span>
+                {isSyncing ? (
+                  <Loader2 size={12} className="animate-spin text-stone-950 ml-1" />
+                ) : (
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-750 animate-pulse ml-1" />
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <CloudOff size={14} className="text-stone-700" />
+                <span className="text-[11px] text-stone-900 uppercase">LocalStorage Mode (Connect Drive to back up catalog additions)</span>
+              </div>
+            )}
+            
+            {syncMessage && (
+              <span className="bg-stone-950 text-amber-400 px-2 py-0.5 rounded text-[9px] animate-pulse uppercase tracking-wider">
+                {syncMessage}
+              </span>
+            )}
           </div>
-          <button
-            onClick={() => setIsCuratorMode(false)}
-            className="px-2.5 py-1 bg-stone-950 hover:bg-stone-850 text-amber-400 text-[10px] uppercase tracking-wider font-extrabold rounded border border-transparent hover:border-amber-400/20 transition-all cursor-pointer shadow"
-          >
-            Exit Studio
-          </button>
+          
+          <div className="flex items-center gap-2">
+            {driveConnected ? (
+              <button
+                onClick={handleDisconnectDrive}
+                className="px-2 py-1 bg-stone-950/10 hover:bg-stone-950/20 text-stone-950 text-[10px] uppercase tracking-wider font-extrabold rounded border border-stone-950/20 transition-all cursor-pointer"
+                title="Disconnect from Google Drive"
+              >
+                Disconnect
+              </button>
+            ) : (
+              <button
+                onClick={handleConnectDrive}
+                disabled={isSyncing}
+                className="px-2.5 py-1 bg-stone-950 hover:bg-stone-900 text-amber-400 text-[10px] uppercase tracking-wider font-extrabold rounded border border-transparent transition-all cursor-pointer shadow flex items-center gap-1"
+              >
+                {isSyncing ? (
+                  <Loader2 size={10} className="animate-spin" />
+                ) : (
+                  <Cloud size={10} />
+                )}
+                <span>Connect Google Drive</span>
+              </button>
+            )}
+            <span className="text-stone-900/20">|</span>
+            <button
+              onClick={() => setIsCuratorMode(false)}
+              className="px-2.5 py-1 bg-stone-950 hover:bg-stone-900 text-amber-400 text-[10px] uppercase tracking-wider font-extrabold rounded border border-transparent transition-all cursor-pointer shadow"
+            >
+              Exit Studio
+            </button>
+          </div>
         </div>
       )}
 
