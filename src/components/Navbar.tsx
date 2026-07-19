@@ -1,17 +1,41 @@
-import React from 'react';
-import { Search, Sparkles, Send } from 'lucide-react';
+import React, { useState } from 'react';
+import { Search, Sparkles, Send, Lock } from 'lucide-react';
 
 interface NavbarProps {
   searchTerm: string;
   onSearchChange: (term: string) => void;
   onOrderClick: () => void;
+  onSecretClick: () => void;
 }
 
 export default function Navbar({
   searchTerm,
   onSearchChange,
   onOrderClick,
+  onSecretClick,
 }: NavbarProps) {
+  const [clickCount, setClickCount] = useState(0);
+  const [clickTimeout, setClickTimeout] = useState<NodeJS.Timeout | null>(null);
+
+  const handleLogoClick = () => {
+    const newCount = clickCount + 1;
+    setClickCount(newCount);
+    
+    if (clickTimeout) {
+      clearTimeout(clickTimeout);
+    }
+
+    if (newCount >= 3) {
+      onSecretClick();
+      setClickCount(0);
+    } else {
+      const timeout = setTimeout(() => {
+        setClickCount(0);
+      }, 2000);
+      setClickTimeout(timeout);
+    }
+  };
+
   return (
     <header className="sticky top-0 z-40 w-full bg-stone-900 text-stone-100 border-b border-stone-800 shadow-md">
       {/* Top Banner */}
@@ -25,15 +49,31 @@ export default function Navbar({
         <div className="flex items-center justify-between h-20 gap-4">
           
           {/* Logo / Brand */}
-          <div className="flex-shrink-0 flex items-center gap-2">
-            <div className="w-10 h-10 bg-amber-500 rounded-lg flex items-center justify-center text-stone-950 font-bold font-mono text-xl shadow-inner">
+          <div 
+            onClick={handleLogoClick}
+            className="flex-shrink-0 flex items-center gap-2 cursor-pointer select-none group"
+            title="Click 3 times to access Curator Portal"
+          >
+            <div className="w-10 h-10 bg-amber-500 rounded-lg flex items-center justify-center text-stone-950 font-bold font-mono text-xl shadow-inner group-hover:bg-amber-400 transition-colors">
               B
             </div>
             <div>
-              <h1 className="text-xl font-bold tracking-tight text-white font-sans flex items-center gap-1.5">
+              <h1 className="text-xl font-bold tracking-tight text-white font-sans flex items-center gap-1.5 group-hover:text-amber-400 transition-colors">
                 BLK2S <span className="text-amber-400">THRIFT</span>
               </h1>
-              <p className="text-[10px] text-stone-400 font-mono tracking-wider">CLOTH AND THRIFT</p>
+              <div className="flex items-center gap-1">
+                <p className="text-[10px] text-stone-400 font-mono tracking-wider">CLOTH AND THRIFT</p>
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSecretClick();
+                  }}
+                  className="p-0.5 text-stone-700 hover:text-amber-500 rounded transition-colors"
+                  title="Curator Access"
+                >
+                  <Lock size={10} />
+                </button>
+              </div>
             </div>
           </div>
 

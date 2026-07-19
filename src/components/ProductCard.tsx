@@ -1,17 +1,25 @@
-import React from 'react';
-import { Star, ShieldAlert, Send } from 'lucide-react';
+import React, { useState } from 'react';
+import { Star, ShieldAlert, Send, Edit, Trash2, AlertTriangle } from 'lucide-react';
 import { Product } from '../types';
 
 interface ProductCardProps {
   key?: string;
   product: Product;
   onViewDetails: (product: Product) => void;
+  isCuratorMode?: boolean;
+  onEdit?: (product: Product) => void;
+  onDelete?: (productId: string) => void;
 }
 
 export default function ProductCard({
   product,
   onViewDetails,
+  isCuratorMode = false,
+  onEdit,
+  onDelete,
 }: ProductCardProps) {
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
   // Calculate average rating
   const averageRating = product.reviews.length
     ? (product.reviews.reduce((sum, r) => sum + r.rating, 0) / product.reviews.length).toFixed(1)
@@ -56,16 +64,77 @@ export default function ProductCard({
         </span>
 
         {/* Year Label (Top Right) */}
-        {product.year && (
+        {product.year && !isCuratorMode && (
           <span className="absolute top-3 right-3 bg-stone-900/90 backdrop-blur-sm text-stone-300 px-2 py-0.5 rounded text-[10px] font-mono font-bold border border-stone-700/60">
             {product.year}
           </span>
+        )}
+
+        {/* Curator Quick Actions (Top Right) */}
+        {isCuratorMode && (
+          <div className="absolute top-3 right-3 flex gap-1.5 z-20">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit?.(product);
+              }}
+              className="p-1.5 bg-amber-400 text-stone-950 hover:bg-amber-300 rounded-lg shadow-lg hover:scale-105 active:scale-95 transition-all border border-transparent cursor-pointer"
+              title="Edit Garment Details"
+            >
+              <Edit size={14} />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowDeleteConfirm(true);
+              }}
+              className="p-1.5 bg-red-600 hover:bg-red-500 text-white rounded-lg shadow-lg hover:scale-105 active:scale-95 transition-all border border-transparent cursor-pointer"
+              title="Remove from Racks"
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
         )}
 
         {/* Tag Overlay (Bottom Left) - Size info */}
         <div className="absolute bottom-3 left-3 bg-stone-900/90 backdrop-blur-sm border border-stone-800 text-stone-200 px-3 py-1 rounded-md text-xs font-mono font-bold">
           SIZE: <span className="text-amber-400">{product.size}</span>
         </div>
+
+        {/* Delete Confirmation Overlay */}
+        {showDeleteConfirm && (
+          <div 
+            className="absolute inset-0 bg-stone-950/95 backdrop-blur-sm z-30 flex flex-col items-center justify-center p-4 text-center select-none animate-in fade-in duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <AlertTriangle className="text-red-500 animate-bounce mb-2" size={24} />
+            <h4 className="text-xs font-mono font-bold text-red-500 tracking-wider uppercase mb-1">REMOVE ARCHIVE?</h4>
+            <p className="text-[10px] text-stone-400 font-sans max-w-[150px] leading-relaxed mb-3">
+              This will permanently delete "{product.title}" from local storage racks.
+            </p>
+            <div className="flex gap-2 w-full max-w-[160px]">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete?.(product.id);
+                  setShowDeleteConfirm(false);
+                }}
+                className="flex-1 py-1.5 bg-red-600 hover:bg-red-500 text-white font-mono text-[10px] font-bold rounded-md transition-colors cursor-pointer"
+              >
+                Yes, Del
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowDeleteConfirm(false);
+                }}
+                className="flex-1 py-1.5 bg-stone-800 hover:bg-stone-700 text-stone-300 font-mono text-[10px] rounded-md transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Information Container */}

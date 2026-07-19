@@ -3,6 +3,7 @@ import { Sparkles, RefreshCw, Info, Filter, ArrowUpDown, Flame, BookmarkCheck, S
 import Navbar from './components/Navbar';
 import ProductCard from './components/ProductCard';
 import ProductDetailModal from './components/ProductDetailModal';
+import AddProductModal from './components/AddProductModal';
 import { INITIAL_PRODUCTS } from './data';
 import { Product, Review } from './types';
 
@@ -17,20 +18,34 @@ export default function App() {
   
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isCuratorMode, setIsCuratorMode] = useState(false);
+  const [productToEdit, setProductToEdit] = useState<Product | null>(null);
 
   // Scroll target reference
   const orderSectionRef = useRef<HTMLDivElement>(null);
 
-  // Initialize data on load
+  // Initialize data on load with smart sync to preserve user-added products
   useEffect(() => {
     const storedProducts = localStorage.getItem('thrift_store_products');
     if (storedProducts) {
       try {
         const parsed = JSON.parse(storedProducts) as Product[];
-        // If the number of products doesn't match the initial list, resync to include new products
-        if (parsed.length !== INITIAL_PRODUCTS.length) {
-          setProducts(INITIAL_PRODUCTS);
-          localStorage.setItem('thrift_store_products', JSON.stringify(INITIAL_PRODUCTS));
+        
+        // Smart merge: make sure all INITIAL_PRODUCTS are in the list by checking ID
+        let isUpdated = false;
+        const mergedList = [...parsed];
+        
+        INITIAL_PRODUCTS.forEach(initialProd => {
+          if (!mergedList.some(item => item.id === initialProd.id)) {
+            mergedList.push(initialProd);
+            isUpdated = true;
+          }
+        });
+
+        if (isUpdated) {
+          setProducts(mergedList);
+          localStorage.setItem('thrift_store_products', JSON.stringify(mergedList));
         } else {
           setProducts(parsed);
         }
@@ -43,6 +58,56 @@ export default function App() {
       localStorage.setItem('thrift_store_products', JSON.stringify(INITIAL_PRODUCTS));
     }
   }, []);
+
+  // Handler for adding a new product (Secret button / Curator panel)
+  const handleAddNewProduct = (newProd: Omit<Product, 'id' | 'reviews'>) => {
+    const freshProduct: Product = {
+      ...newProd,
+      id: `p-${Date.now()}`,
+      reviews: []
+    };
+    
+    const updated = [freshProduct, ...products];
+    setProducts(updated);
+    localStorage.setItem('thrift_store_products', JSON.stringify(updated));
+  };
+
+  // Handler for editing an existing product
+  const handleEditProduct = (product: Product) => {
+    setProductToEdit(product);
+    setIsAddModalOpen(true);
+  };
+
+  // Handler for updating an existing product
+  const handleUpdateProduct = (productId: string, updatedFields: Partial<Product>) => {
+    const updated = products.map(p => {
+      if (p.id === productId) {
+        const merged = { ...p, ...updatedFields };
+        // Sync open detail view modal if that's the one edited
+        if (selectedProduct && selectedProduct.id === productId) {
+          setSelectedProduct(merged);
+        }
+        return merged;
+      }
+      return p;
+    });
+    setProducts(updated);
+    localStorage.setItem('thrift_store_products', JSON.stringify(updated));
+    setProductToEdit(null);
+  };
+
+  // Handler for removing a product
+  const handleDeleteProduct = (productId: string) => {
+    const updated = products.filter(p => p.id !== productId);
+    setProducts(updated);
+    localStorage.setItem('thrift_store_products', JSON.stringify(updated));
+    
+    // Auto-close detail modal if the deleted item was open
+    if (selectedProduct && selectedProduct.id === productId) {
+      setIsDetailOpen(false);
+      setSelectedProduct(null);
+    }
+  };
 
   // Scroll helper
   const handleScrollToOrder = () => {
@@ -119,11 +184,30 @@ export default function App() {
   return (
     <div className="min-h-screen bg-stone-950 text-stone-100 flex flex-col font-sans antialiased selection:bg-amber-400 selection:text-stone-950">
       
+      {isCuratorMode && (
+        <div className="bg-amber-400 text-stone-950 px-4 py-2 text-center text-xs font-mono font-bold flex items-center justify-between gap-3 animate-in slide-in-from-top duration-200 sticky top-0 z-50 shadow-md">
+          <div className="flex items-center gap-1.5 mx-auto">
+            <span className="w-2 h-2 rounded-full bg-stone-950 animate-ping" />
+            <span>CURATOR ACTIVE • EDIT OR REMOVE ITEMS DIRECTLY ON CARDS</span>
+          </div>
+          <button
+            onClick={() => setIsCuratorMode(false)}
+            className="px-2.5 py-1 bg-stone-950 hover:bg-stone-850 text-amber-400 text-[10px] uppercase tracking-wider font-extrabold rounded border border-transparent hover:border-amber-400/20 transition-all cursor-pointer shadow"
+          >
+            Exit Studio
+          </button>
+        </div>
+      )}
+
       {/* Navbar Integration */}
       <Navbar
         searchTerm={searchTerm}
         onSearchChange={setSearchTerm}
         onOrderClick={handleScrollToOrder}
+        onSecretClick={() => {
+          setIsCuratorMode(true);
+          setIsAddModalOpen(true);
+        }}
       />
 
       {/* Hero Visual Area */}
@@ -217,6 +301,9 @@ export default function App() {
                     setSelectedProduct(prod);
                     setIsDetailOpen(true);
                   }}
+                  isCuratorMode={isCuratorMode}
+                  onEdit={handleEditProduct}
+                  onDelete={handleDeleteProduct}
                 />
               );
             })}
@@ -329,12 +416,32 @@ export default function App() {
           <div className="flex justify-center gap-4 text-[10px] font-mono text-stone-500 pt-2">
             <span>© 2026 BLK2S THRIFT CO.</span>
             <span>•</span>
-            <span>ALL UNIQUE PIECES</span>
+            <button 
+              onClick={() => {
+                setIsCuratorMode(true);
+                setIsAddModalOpen(true);
+              }}
+              className="hover:text-amber-400 hover:underline transition-all cursor-pointer font-bold"
+            >
+              CURATOR ACCESS
+            </button>
             <span>•</span>
             <span>SUSTAINABILITY PLEDGE</span>
           </div>
         </div>
       </footer>
+
+      {/* Secret Curator Add/Edit Product Modal */}
+      <AddProductModal
+        isOpen={isAddModalOpen}
+        onClose={() => {
+          setIsAddModalOpen(false);
+          setProductToEdit(null);
+        }}
+        onAddProduct={handleAddNewProduct}
+        onUpdateProduct={handleUpdateProduct}
+        productToEdit={productToEdit}
+      />
     </div>
   );
 }
