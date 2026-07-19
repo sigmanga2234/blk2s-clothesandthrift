@@ -17,7 +17,7 @@ import {
   getAccessToken 
 } from './lib/driveAuth';
 import { User, onAuthStateChanged } from 'firebase/auth';
-import { getDocs, collection, setDoc, doc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { getDocs, collection, setDoc, doc, deleteDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { db, auth, loginAnonymously } from './lib/firebase';
 
 export default function App() {
@@ -96,34 +96,22 @@ export default function App() {
       setProducts(INITIAL_PRODUCTS);
     }
 
-    // 2. Fetch and synchronize with public global Firestore database
-    const loadProductsFromFirestore = async () => {
-      setIsSyncing(true);
-      setSyncMessage('Syncing with global inventory catalog...');
-      try {
-        const querySnapshot = await getDocs(collection(db, 'products'));
-        const dbProducts: Product[] = [];
-        querySnapshot.forEach((docSnapshot) => {
-          dbProducts.push(docSnapshot.data() as Product);
-        });
+    // 2. Real-time synchronize with public global Firestore database
+    setIsSyncing(true);
+    setSyncMessage('Syncing with global inventory catalog...');
+    const unsubFirestore = onSnapshot(collection(db, 'products'), (querySnapshot) => {
+      const dbProducts: Product[] = [];
+      querySnapshot.forEach((docSnapshot) => {
+        dbProducts.push(docSnapshot.data() as Product);
+      });
 
-        if (dbProducts.length > 0) {
-          // Merge local and remote changes safely
-          const merged = [...dbProducts];
-          let isUpdated = false;
-          INITIAL_PRODUCTS.forEach(initialProd => {
-            if (!merged.some(item => item.id === initialProd.id)) {
-              const withPasscode = { ...initialProd, passcode: 'BLK2S' };
-              merged.push(withPasscode);
-              isUpdated = true;
-              setDoc(doc(db, 'products', initialProd.id), withPasscode).catch(e => console.error("Failed to seed initial product:", e));
-            }
-          });
-
+      if (dbProducts.length > 0) {
+        setProducts((currentProducts) => {
           // Check if there are any new remote products that we didn't have stored locally
-          if (storedProducts) {
+          const previousStored = localStorage.getItem('thrift_store_products');
+          if (previousStored) {
             try {
-              const previousList = JSON.parse(storedProducts) as Product[];
+              const previousList = JSON.parse(previousStored) as Product[];
               const newRemoteDrops = dbProducts.filter(dbP => 
                 !previousList.some(prevP => prevP.id === dbP.id) &&
                 !INITIAL_PRODUCTS.some(initP => initP.id === dbP.id)
@@ -141,7 +129,9 @@ export default function App() {
                 }));
 
                 setNotifications(prev => {
-                  const updated = [...newNotifications, ...prev];
+                  // Filter out duplicates
+                  const filteredPrev = prev.filter(p => !newNotifications.some(n => n.id === p.id));
+                  const updated = [...newNotifications, ...filteredPrev];
                   localStorage.setItem('thrift_store_notifications', JSON.stringify(updated));
                   return updated;
                 });
@@ -154,35 +144,44 @@ export default function App() {
             }
           }
 
-          setProducts(merged);
-          localStorage.setItem('thrift_store_products', JSON.stringify(merged));
-          setSyncMessage('Catalog synced globally.');
-          setTimeout(() => setSyncMessage(''), 1500);
-        } else {
-          // Firestore database is blank, seed it with initial products
-          setSyncMessage('Bootstrapping public catalog database...');
-          const seedPromises = INITIAL_PRODUCTS.map(prod => {
-            const withPasscode = { ...prod, passcode: 'BLK2S' };
-            return setDoc(doc(db, 'products', prod.id), withPasscode);
+          // Merge default products if missing in Firestore
+          const merged = [...dbProducts];
+          INITIAL_PRODUCTS.forEach(initialProd => {
+            if (!merged.some(item => item.id === initialProd.id)) {
+              const withPasscode = { ...initialProd, passcode: 'BLK2S' };
+              merged.push(withPasscode);
+              setDoc(doc(db, 'products', initialProd.id), withPasscode).catch(e => console.error("Failed to seed initial product:", e));
+            }
           });
-          await Promise.all(seedPromises);
-          
+
+          localStorage.setItem('thrift_store_products', JSON.stringify(merged));
+          return merged;
+        });
+
+        setSyncMessage('Catalog synced globally.');
+        setTimeout(() => setSyncMessage(''), 1500);
+      } else {
+        // Firestore database is blank, seed it with initial products
+        setSyncMessage('Bootstrapping public catalog database...');
+        const seedPromises = INITIAL_PRODUCTS.map(prod => {
+          const withPasscode = { ...prod, passcode: 'BLK2S' };
+          return setDoc(doc(db, 'products', prod.id), withPasscode);
+        });
+        Promise.all(seedPromises).then(() => {
           const initialWithPasscode = INITIAL_PRODUCTS.map(p => ({ ...p, passcode: 'BLK2S' }));
           setProducts(initialWithPasscode);
           localStorage.setItem('thrift_store_products', JSON.stringify(initialWithPasscode));
           setSyncMessage('Global database seeded!');
           setTimeout(() => setSyncMessage(''), 2000);
-        }
-      } catch (error) {
-        console.error("Failed to load global catalog from Firestore:", error);
-        setSyncMessage('Offline mode. Using local cache.');
-        setTimeout(() => setSyncMessage(''), 3000);
-      } finally {
-        setIsSyncing(false);
+        }).catch(e => console.error("Error seeding global database:", e));
       }
-    };
-
-    loadProductsFromFirestore();
+      setIsSyncing(false);
+    }, (error) => {
+      console.error("Failed to load global catalog from Firestore:", error);
+      setSyncMessage('Offline mode. Using local cache.');
+      setTimeout(() => setSyncMessage(''), 3000);
+      setIsSyncing(false);
+    });
 
     // 3. Auth listener to restore active Google Drive session
     const unsubscribe = initAuth(
@@ -248,6 +247,7 @@ export default function App() {
     return () => {
       unsubscribe();
       unsubFirebase();
+      if (unsubFirestore) unsubFirestore();
     };
   }, []);
 

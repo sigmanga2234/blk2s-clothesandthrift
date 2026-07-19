@@ -109,22 +109,54 @@ export default function AddProductModal({
       return;
     }
 
-    // Limit size to ~5MB to avoid localStorage limits
-    if (file.size > 5 * 1024 * 1024) {
-      setErrors(prev => ({ ...prev, image: 'Image is too large. Please select an image under 5MB.' }));
-      return;
-    }
-
     const reader = new FileReader();
     reader.onloadend = () => {
-      const base64String = reader.result as string;
-      setImageBase64(base64String);
-      setImagePreview(base64String);
-      setErrors(prev => {
-        const copy = { ...prev };
-        delete copy.image;
-        return copy;
-      });
+      const img = new Image();
+      img.src = reader.result as string;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 800;
+        const MAX_HEIGHT = 800;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          // Compress as JPEG at 0.75 quality (highly optimized size while preserving clear details)
+          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.75);
+          setImageBase64(compressedBase64);
+          setImagePreview(compressedBase64);
+          setErrors(prev => {
+            const copy = { ...prev };
+            delete copy.image;
+            return copy;
+          });
+        } else {
+          const base64String = reader.result as string;
+          setImageBase64(base64String);
+          setImagePreview(base64String);
+          setErrors(prev => {
+            const copy = { ...prev };
+            delete copy.image;
+            return copy;
+          });
+        }
+      };
     };
     reader.readAsDataURL(file);
   };
