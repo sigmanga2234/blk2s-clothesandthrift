@@ -1,11 +1,6 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
+import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
 import { Product } from '../types';
-import firebaseConfig from '../../firebase-applet-config.json';
-
-// Reuse existing app or initialize new one
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
-const auth = getAuth(app);
+import { auth } from './firebase';
 
 const provider = new GoogleAuthProvider();
 // Request Google Drive file access scope

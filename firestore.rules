@@ -1,0 +1,58 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global Safety Net Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Auth and structural helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidProduct(data) {
+      return data.id is string
+        && data.title is string && data.title.size() <= 100
+        && data.price is number && data.price >= 0
+        && data.category is string && data.category.size() <= 50
+        && data.image is string
+        && data.description is string && data.description.size() <= 1000
+        && data.size is string && data.size.size() <= 20
+        && (data.condition == 'Mint' || data.condition == 'Excellent' || data.condition == 'Gently Used' || data.condition == 'Distressed')
+        && data.reviews is list;
+    }
+
+    // Rules for the Products collection
+    match /products/{productId} {
+      allow read: if true;
+      
+      allow create: if isSignedIn() 
+        && isValidId(productId) 
+        && isValidProduct(incoming())
+        && incoming().id == productId;
+
+      allow update: if (
+        // Curator updates (authorized, fully validated product)
+        (isSignedIn() && isValidProduct(incoming()))
+        // Unauthenticated review updates (strangers adding a review without changing main attributes)
+        || (incoming().diff(existing()).affectedKeys().hasOnly(['reviews']) && incoming().reviews is list)
+      );
+
+      allow delete: if isSignedIn();
+    }
+  }
+}

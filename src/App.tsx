@@ -17,6 +17,8 @@ import {
   getAccessToken 
 } from './lib/driveAuth';
 import { User } from 'firebase/auth';
+import { getDocs, collection, setDoc, doc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { db } from './lib/firebase';
 
 export default function App() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -45,39 +47,69 @@ export default function App() {
 
   // Initialize data on load with smart sync to preserve user-added products
   useEffect(() => {
-    // 1. Initial Local load from localStorage
+    // 1. Initial Local load from localStorage (fast UI start)
     const storedProducts = localStorage.getItem('thrift_store_products');
-    let localList: Product[] = [];
     if (storedProducts) {
       try {
-        const parsed = JSON.parse(storedProducts) as Product[];
-        const mergedList = [...parsed];
-        let isUpdated = false;
-        
-        INITIAL_PRODUCTS.forEach(initialProd => {
-          if (!mergedList.some(item => item.id === initialProd.id)) {
-            mergedList.push(initialProd);
-            isUpdated = true;
-          }
-        });
-
-        if (isUpdated) {
-          localStorage.setItem('thrift_store_products', JSON.stringify(mergedList));
-        }
-        localList = mergedList;
-        setProducts(mergedList);
+        setProducts(JSON.parse(storedProducts));
       } catch (e) {
         setProducts(INITIAL_PRODUCTS);
-        localStorage.setItem('thrift_store_products', JSON.stringify(INITIAL_PRODUCTS));
-        localList = INITIAL_PRODUCTS;
       }
     } else {
       setProducts(INITIAL_PRODUCTS);
-      localStorage.setItem('thrift_store_products', JSON.stringify(INITIAL_PRODUCTS));
-      localList = INITIAL_PRODUCTS;
     }
 
-    // 2. Auth listener to restore active Google Drive session
+    // 2. Fetch and synchronize with public global Firestore database
+    const loadProductsFromFirestore = async () => {
+      setIsSyncing(true);
+      setSyncMessage('Syncing with global inventory catalog...');
+      try {
+        const querySnapshot = await getDocs(collection(db, 'products'));
+        const dbProducts: Product[] = [];
+        querySnapshot.forEach((docSnapshot) => {
+          dbProducts.push(docSnapshot.data() as Product);
+        });
+
+        if (dbProducts.length > 0) {
+          // Merge local and remote changes safely
+          const merged = [...dbProducts];
+          let isUpdated = false;
+          INITIAL_PRODUCTS.forEach(initialProd => {
+            if (!merged.some(item => item.id === initialProd.id)) {
+              merged.push(initialProd);
+              isUpdated = true;
+              setDoc(doc(db, 'products', initialProd.id), initialProd).catch(e => console.error("Failed to seed initial product:", e));
+            }
+          });
+
+          setProducts(merged);
+          localStorage.setItem('thrift_store_products', JSON.stringify(merged));
+          setSyncMessage('Catalog synced globally.');
+          setTimeout(() => setSyncMessage(''), 1500);
+        } else {
+          // Firestore database is blank, seed it with initial products
+          setSyncMessage('Bootstrapping public catalog database...');
+          const seedPromises = INITIAL_PRODUCTS.map(prod => {
+            return setDoc(doc(db, 'products', prod.id), prod);
+          });
+          await Promise.all(seedPromises);
+          setProducts(INITIAL_PRODUCTS);
+          localStorage.setItem('thrift_store_products', JSON.stringify(INITIAL_PRODUCTS));
+          setSyncMessage('Global database seeded!');
+          setTimeout(() => setSyncMessage(''), 2000);
+        }
+      } catch (error) {
+        console.error("Failed to load global catalog from Firestore:", error);
+        setSyncMessage('Offline mode. Using local cache.');
+        setTimeout(() => setSyncMessage(''), 3000);
+      } finally {
+        setIsSyncing(false);
+      }
+    };
+
+    loadProductsFromFirestore();
+
+    // 3. Auth listener to restore active Google Drive session
     const unsubscribe = initAuth(
       async (user, token) => {
         setGoogleUser(user);
@@ -91,7 +123,7 @@ export default function App() {
             setSyncMessage('Syncing with Google Drive...');
             const remoteProducts = await downloadDriveFile(token, fileId);
             if (remoteProducts && remoteProducts.length > 0) {
-              // Smart merge local and remote
+              // Smart merge local, remote and Drive
               const currentLocal = JSON.parse(localStorage.getItem('thrift_store_products') || '[]');
               const merged = [...currentLocal];
               
@@ -116,6 +148,10 @@ export default function App() {
               
               // Push merged state back to drive to ensure clean sync
               await updateDriveFileContent(token, fileId, merged);
+
+              // Also write any new/missing items to Firestore!
+              const firestorePromises = merged.map(item => setDoc(doc(db, 'products', item.id), item));
+              await Promise.all(firestorePromises).catch(e => console.error("Failed to write to Firestore on Drive sync:", e));
             }
           }
           setSyncMessage('');
@@ -242,7 +278,7 @@ export default function App() {
   };
 
   // Handler for adding a new product (Secret button / Curator panel)
-  const handleAddNewProduct = (newProd: Omit<Product, 'id' | 'reviews'>) => {
+  const handleAddNewProduct = async (newProd: Omit<Product, 'id' | 'reviews'>) => {
     const freshProduct: Product = {
       ...newProd,
       id: `p-${Date.now()}`,
@@ -253,6 +289,16 @@ export default function App() {
     setProducts(updated);
     localStorage.setItem('thrift_store_products', JSON.stringify(updated));
     syncToDrive(updated);
+
+    try {
+      await setDoc(doc(db, 'products', freshProduct.id), freshProduct);
+      setSyncMessage('Product published globally!');
+      setTimeout(() => setSyncMessage(''), 1500);
+    } catch (error) {
+      console.error("Failed to add product to global database:", error);
+      setSyncMessage('Saved locally. Sign in to update global catalog.');
+      setTimeout(() => setSyncMessage(''), 4000);
+    }
   };
 
   // Handler for editing an existing product
@@ -262,7 +308,8 @@ export default function App() {
   };
 
   // Handler for updating an existing product
-  const handleUpdateProduct = (productId: string, updatedFields: Partial<Product>) => {
+  const handleUpdateProduct = async (productId: string, updatedFields: Partial<Product>) => {
+    let targetProduct: Product | null = null;
     const updated = products.map(p => {
       if (p.id === productId) {
         const merged = { ...p, ...updatedFields };
@@ -270,6 +317,7 @@ export default function App() {
         if (selectedProduct && selectedProduct.id === productId) {
           setSelectedProduct(merged);
         }
+        targetProduct = merged;
         return merged;
       }
       return p;
@@ -278,10 +326,22 @@ export default function App() {
     localStorage.setItem('thrift_store_products', JSON.stringify(updated));
     setProductToEdit(null);
     syncToDrive(updated);
+
+    if (targetProduct) {
+      try {
+        await setDoc(doc(db, 'products', productId), targetProduct);
+        setSyncMessage('Product updated globally!');
+        setTimeout(() => setSyncMessage(''), 1500);
+      } catch (error) {
+        console.error("Failed to update product in global database:", error);
+        setSyncMessage('Saved locally. Sign in to update global catalog.');
+        setTimeout(() => setSyncMessage(''), 4000);
+      }
+    }
   };
 
   // Handler for removing a product
-  const handleDeleteProduct = (productId: string) => {
+  const handleDeleteProduct = async (productId: string) => {
     const updated = products.filter(p => p.id !== productId);
     setProducts(updated);
     localStorage.setItem('thrift_store_products', JSON.stringify(updated));
@@ -292,6 +352,16 @@ export default function App() {
       setSelectedProduct(null);
     }
     syncToDrive(updated);
+
+    try {
+      await deleteDoc(doc(db, 'products', productId));
+      setSyncMessage('Product removed globally!');
+      setTimeout(() => setSyncMessage(''), 1500);
+    } catch (error) {
+      console.error("Failed to delete product from global database:", error);
+      setSyncMessage('Removed locally. Sign in to update global catalog.');
+      setTimeout(() => setSyncMessage(''), 4000);
+    }
   };
 
   // Scroll helper
@@ -300,7 +370,8 @@ export default function App() {
   };
 
   // Add review to a specific product
-  const handleAddReview = (productId: string, reviewData: Omit<Review, 'id' | 'date'>) => {
+  const handleAddReview = async (productId: string, reviewData: Omit<Review, 'id' | 'date'>) => {
+    let targetProduct: Product | undefined;
     const updatedProducts = products.map(product => {
       if (product.id === productId) {
         // Build new review item
@@ -319,6 +390,7 @@ export default function App() {
           setSelectedProduct(updatedProduct);
         }
 
+        targetProduct = updatedProduct;
         return updatedProduct;
       }
       return product;
@@ -327,6 +399,20 @@ export default function App() {
     setProducts(updatedProducts);
     localStorage.setItem('thrift_store_products', JSON.stringify(updatedProducts));
     syncToDrive(updatedProducts);
+
+    if (targetProduct) {
+      try {
+        await updateDoc(doc(db, 'products', productId), {
+          reviews: targetProduct.reviews
+        });
+        setSyncMessage('Review added globally!');
+        setTimeout(() => setSyncMessage(''), 1500);
+      } catch (error) {
+        console.error("Failed to add review to global database:", error);
+        setSyncMessage('Review saved locally.');
+        setTimeout(() => setSyncMessage(''), 4000);
+      }
+    }
   };
 
   // Filter and Sort calculation

@@ -1,0 +1,30 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "Thrift store clothing product with metadata and nested reviews",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique product ID" },
+        "title": { "type": "string", "maxLength": 100 },
+        "price": { "type": "number" },
+        "category": { "type": "string", "maxLength": 50 },
+        "image": { "type": "string" },
+        "description": { "type": "string", "maxLength": 1000 },
+        "size": { "type": "string", "maxLength": 20 },
+        "condition": { "type": "string", "enum": ["Mint", "Excellent", "Gently Used", "Distressed"] },
+        "material": { "type": "string", "maxLength": 50 },
+        "year": { "type": "string", "maxLength": 10 },
+        "reviews": { "type": "array", "description": "List of customer reviews" },
+        "isFeatured": { "type": "boolean" }
+      },
+      "required": ["id", "title", "price", "category", "image", "description", "size", "condition", "reviews"]
+    }
+  },
+  "firestore": {
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Global collection of thrift store catalog items"
+    }
+  }
+}
