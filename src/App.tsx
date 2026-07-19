@@ -42,6 +42,7 @@ export default function App() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string>('');
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
+  const [showIframeWarning, setShowIframeWarning] = useState(false);
   const [passcodeVerified, setPasscodeVerified] = useState<boolean>(() => {
     return localStorage.getItem('thrift_store_curator_passcode') === 'BLK2S';
   });
@@ -273,6 +274,12 @@ export default function App() {
 
   // Connect & Sync with Google Account Popup
   const handleConnectDrive = async () => {
+    const isEmbedded = window.self !== window.top;
+    if (isEmbedded) {
+      setShowIframeWarning(true);
+      return;
+    }
+
     setIsSyncing(true);
     setSyncMessage('Connecting to Google Account...');
     try {
@@ -335,7 +342,12 @@ export default function App() {
       }
     } catch (err: any) {
       console.error('Google Drive Sync setup failed:', err);
-      const errMsg = err?.message || String(err);
+      let errMsg = err?.message || String(err);
+      if (err?.code === 'auth/popup-closed-by-user') {
+        errMsg = "Sign-in popup was closed before completion.";
+      } else if (err?.code === 'auth/popup-blocked') {
+        errMsg = "Sign-in popup was blocked. Please enable popups.";
+      }
       setSyncMessage(`Setup failed: ${errMsg}`);
       setTimeout(() => setSyncMessage(''), 8000);
     } finally {
@@ -932,6 +944,52 @@ export default function App() {
           >
             ✕
           </button>
+        </div>
+      )}
+
+      {/* Iframe Pop-up Warning Modal */}
+      {showIframeWarning && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="w-full max-w-md bg-stone-900 border border-stone-800 rounded-2xl shadow-2xl overflow-hidden p-6 text-center space-y-6">
+            <div className="w-12 h-12 rounded-full bg-amber-400/10 border border-amber-400/20 text-amber-400 flex items-center justify-center mx-auto">
+              <Info size={24} />
+            </div>
+            
+            <div className="space-y-2">
+              <h3 className="text-lg font-serif font-bold text-white tracking-tight">
+                Preview Sandbox Constraint
+              </h3>
+              <p className="text-xs text-stone-400 leading-relaxed font-sans">
+                You are currently viewing the application within the **AI Studio Sandbox iframe**.
+              </p>
+              <p className="text-xs text-stone-300 leading-relaxed font-sans">
+                Modern browsers block Google Authentication popups inside nested iframes to protect your account security.
+              </p>
+              <p className="text-xs text-amber-400/90 font-mono">
+                Click below to open the app in a new browser tab where Google Sync works perfectly!
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2 pt-2">
+              <button
+                onClick={() => {
+                  window.open(window.location.href, '_blank');
+                  setShowIframeWarning(false);
+                }}
+                className="w-full px-4 py-2.5 bg-amber-400 hover:bg-amber-300 text-stone-950 rounded-xl text-xs font-mono font-bold tracking-wider uppercase transition-all shadow-lg flex items-center justify-center gap-1.5 cursor-pointer animate-pulse"
+              >
+                <Sparkles size={14} />
+                Open App in New Tab
+              </button>
+              
+              <button
+                onClick={() => setShowIframeWarning(false)}
+                className="w-full px-4 py-2 text-stone-400 hover:text-stone-200 rounded-xl text-xs font-mono transition-all cursor-pointer"
+              >
+                Cancel & Close
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
