@@ -1,0 +1,6 @@
+{
+  "name": "Thrift Store Template",
+  "description": "A beautiful thrift store catalog template with category filtering, an interactive shopping cart, and a user review system.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
