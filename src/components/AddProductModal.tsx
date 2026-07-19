@@ -10,6 +10,8 @@ interface AddProductModalProps {
   productToEdit?: Product | null;
   driveConnected?: boolean;
   onConnectDrive?: () => void;
+  firebaseUser?: any | null;
+  onSignInAnonymously?: () => void;
 }
 
 export default function AddProductModal({ 
@@ -19,7 +21,9 @@ export default function AddProductModal({
   onUpdateProduct, 
   productToEdit = null,
   driveConnected = false,
-  onConnectDrive
+  onConnectDrive,
+  firebaseUser = null,
+  onSignInAnonymously
 }: AddProductModalProps) {
   const [title, setTitle] = useState('');
   const [price, setPrice] = useState('');
@@ -277,24 +281,76 @@ export default function AddProductModal({
 
         {/* Modal Body / Form */}
         <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-6 flex-1">
-          {!driveConnected && (
-            <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-amber-200 text-xs font-mono flex flex-col sm:flex-row gap-4 items-center justify-between">
+          {!firebaseUser ? (
+            <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-amber-200 text-xs font-mono flex flex-col gap-4">
               <div className="flex gap-2.5 items-start">
                 <ShieldAlert size={18} className="shrink-0 text-amber-400 mt-0.5 animate-pulse" />
                 <div className="space-y-1">
                   <span className="font-bold text-amber-400 block uppercase tracking-wider text-[11px]">Unsigned Curator Mode (Local Only)</span>
                   <p className="text-stone-300 text-[11px] leading-relaxed">
-                    You are not signed in. Products registered now will only be saved in this browser, and won't appear on other devices (like your phone) or other visitors' screens.
+                    You are not signed in. Products added now will only be saved in this browser, and won't appear on other devices (like your phone). To sync globally, please sign in below:
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={onConnectDrive}
-                className="shrink-0 w-full sm:w-auto px-4 py-2 bg-amber-400 hover:bg-amber-300 text-stone-950 font-bold rounded-xl transition-all cursor-pointer text-[10px] uppercase tracking-widest shadow-md hover:scale-105 active:scale-95 flex items-center justify-center gap-1.5"
-              >
-                Sign In with Google
-              </button>
+              <div className="flex flex-col md:flex-row gap-4 items-stretch md:items-center pt-2 border-t border-stone-800">
+                <button
+                  type="button"
+                  onClick={onConnectDrive}
+                  className="shrink-0 px-4 py-2 bg-amber-400 hover:bg-amber-300 text-stone-950 font-bold rounded-xl transition-all cursor-pointer text-[10px] uppercase tracking-widest shadow-md hover:scale-105 active:scale-95 flex items-center justify-center gap-1.5"
+                >
+                  Sign In with Google
+                </button>
+                <div className="flex items-center gap-2 text-stone-500 text-[10px] uppercase font-bold justify-center">
+                  <span className="h-px bg-stone-800 flex-1 w-4" />
+                  <span>or enter passcode</span>
+                  <span className="h-px bg-stone-800 flex-1 w-4" />
+                </div>
+                <div className="flex-1 flex gap-2">
+                  <input
+                    type="password"
+                    placeholder="Curator Passcode (e.g. BLK2S)"
+                    id="curator-passcode-input"
+                    className="flex-1 min-w-0 px-3 py-1.5 bg-stone-950 border border-stone-800 rounded-xl text-stone-100 placeholder-stone-600 focus:outline-none focus:ring-1 focus:ring-amber-500 text-xs"
+                    onKeyDown={async (e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const val = (e.target as HTMLInputElement).value;
+                        if (val.trim().toUpperCase() === 'BLK2S') {
+                          if (onSignInAnonymously) onSignInAnonymously();
+                        } else {
+                          alert('Invalid passcode. Try "BLK2S".');
+                        }
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const el = document.getElementById('curator-passcode-input') as HTMLInputElement;
+                      if (el && el.value.trim().toUpperCase() === 'BLK2S') {
+                        if (onSignInAnonymously) onSignInAnonymously();
+                      } else {
+                        alert('Invalid passcode. Try "BLK2S".');
+                      }
+                    }}
+                    className="px-3 py-1.5 bg-stone-800 hover:bg-stone-700 text-amber-400 rounded-xl text-[10px] uppercase font-bold tracking-wider transition-colors border border-stone-700 cursor-pointer"
+                  >
+                    Verify
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-emerald-200 text-xs font-mono flex items-center justify-between">
+              <div className="flex gap-2.5 items-center">
+                <CheckCircle size={18} className="text-emerald-400 shrink-0" />
+                <div className="space-y-0.5">
+                  <span className="font-bold text-emerald-400 uppercase tracking-wider text-[11px] block">Global Catalog Synced</span>
+                  <p className="text-stone-300 text-[10px]">
+                    Authentication active. Your changes will automatically publish to your phone and all other visitors globally.
+                  </p>
+                </div>
+              </div>
             </div>
           )}
 

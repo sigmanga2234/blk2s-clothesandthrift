@@ -16,9 +16,9 @@ import {
   updateDriveFileContent, 
   getAccessToken 
 } from './lib/driveAuth';
-import { User } from 'firebase/auth';
+import { User, onAuthStateChanged } from 'firebase/auth';
 import { getDocs, collection, setDoc, doc, deleteDoc, updateDoc } from 'firebase/firestore';
-import { db } from './lib/firebase';
+import { db, auth, loginAnonymously } from './lib/firebase';
 
 export default function App() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -41,12 +41,18 @@ export default function App() {
   const [driveFileId, setDriveFileId] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string>('');
+  const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
 
   // Scroll target reference
   const orderSectionRef = useRef<HTMLDivElement>(null);
 
   // Initialize data on load with smart sync to preserve user-added products
   useEffect(() => {
+    // Track direct Firebase Auth state changes (both Google and Anonymous)
+    const unsubFirebase = onAuthStateChanged(auth, (user) => {
+      setFirebaseUser(user);
+    });
+
     // 1. Initial Local load from localStorage (fast UI start)
     const storedProducts = localStorage.getItem('thrift_store_products');
     if (storedProducts) {
@@ -170,7 +176,10 @@ export default function App() {
       }
     );
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      unsubFirebase();
+    };
   }, []);
 
   // Sync state to Google Drive on content changes
@@ -257,8 +266,9 @@ export default function App() {
       }
     } catch (err: any) {
       console.error('Google Drive Sync setup failed:', err);
-      setSyncMessage('Authentication or file setup failed.');
-      setTimeout(() => setSyncMessage(''), 4000);
+      const errMsg = err?.message || String(err);
+      setSyncMessage(`Setup failed: ${errMsg}`);
+      setTimeout(() => setSyncMessage(''), 8000);
     } finally {
       setIsSyncing(false);
     }
@@ -274,6 +284,25 @@ export default function App() {
       setTimeout(() => setSyncMessage(''), 2000);
     } catch (err) {
       console.error('Disconnect failed:', err);
+    }
+  };
+
+  // Anonymous Sign In with Curator Passcode
+  const handleSignInAnonymously = async () => {
+    setIsSyncing(true);
+    setSyncMessage('Activating curator credentials...');
+    try {
+      const user = await loginAnonymously();
+      if (user) {
+        setSyncMessage('Direct sync active!');
+        setTimeout(() => setSyncMessage(''), 2000);
+      }
+    } catch (err: any) {
+      console.error('Anonymous sign-in failed:', err);
+      setSyncMessage(`Setup failed: ${err.message || err}`);
+      setTimeout(() => setSyncMessage(''), 4000);
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -464,22 +493,20 @@ export default function App() {
               <span className="uppercase tracking-wider">STUDIO MODE ACTIVE</span>
             </div>
             <span className="text-stone-900/40 hidden md:inline">|</span>
-            {driveConnected ? (
+            {firebaseUser ? (
               <div className="flex items-center gap-1.5">
-                <Cloud size={14} className="text-emerald-900" />
-                <span className="text-[11px] text-stone-900 uppercase">
-                  Drive Synced: <span className="underline decoration-stone-900/30">{googleUser?.email}</span>
+                <Database size={14} className="text-emerald-950 shrink-0" />
+                <span className="text-[11px] text-stone-900 uppercase font-bold">
+                  Global Sync Active {firebaseUser.isAnonymous ? '(Curator Passcode)' : `(${firebaseUser.email})`}
                 </span>
-                {isSyncing ? (
-                  <Loader2 size={12} className="animate-spin text-stone-950 ml-1" />
-                ) : (
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-750 animate-pulse ml-1" />
+                {driveConnected && (
+                  <span className="text-[10px] text-emerald-950/80 uppercase font-mono hidden sm:inline">• Google Drive Synced</span>
                 )}
               </div>
             ) : (
               <div className="flex items-center gap-1.5">
-                <CloudOff size={14} className="text-stone-700" />
-                <span className="text-[11px] text-stone-900 uppercase">LocalStorage Mode (Connect Drive to back up catalog additions)</span>
+                <CloudOff size={14} className="text-stone-700 shrink-0" />
+                <span className="text-[11px] text-stone-900 uppercase">Local-Only Mode (Sign in inside modal to sync with your phone)</span>
               </div>
             )}
             
@@ -768,6 +795,8 @@ export default function App() {
         productToEdit={productToEdit}
         driveConnected={driveConnected}
         onConnectDrive={handleConnectDrive}
+        firebaseUser={firebaseUser}
+        onSignInAnonymously={handleSignInAnonymously}
       />
     </div>
   );
